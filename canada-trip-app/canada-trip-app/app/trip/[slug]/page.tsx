@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { useParams } from 'next/navigation';
+import { upload } from '@vercel/blob/client';
 
 type GeneralBooking = {
   id: string;
@@ -447,13 +448,13 @@ export default function TripPage() {
   // ---------- images ----------
   async function uploadImage(file: File): Promise<string | null> {
     try {
-      const form = new FormData();
-      form.append('file', file);
-      const res = await fetch('/api/upload', { method: 'POST', body: form });
-      if (!res.ok) throw new Error('upload failed');
-      const json = await res.json();
-      return json.url || null;
+      const blob = await upload(file.name, file, {
+        access: 'public',
+        handleUploadUrl: '/api/upload'
+      });
+      return blob.url;
     } catch (e) {
+      console.error(e);
       flashToast('Erreur d\'envoi de la photo');
       return null;
     }

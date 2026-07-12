@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sql, ensureTables } from '@/lib/db';
 
+export const dynamic = 'force-dynamic';
+
 export async function PUT(
   req: NextRequest,
   { params }: { params: { slug: string; id: string } }
@@ -20,6 +22,8 @@ export async function PUT(
         checkin = ${s.checkin || null},
         checkout = ${s.checkout || null},
         activities = ${JSON.stringify(s.activities || [])}::jsonb,
+        city_image = ${s.cityImage || null},
+        hotel_image = ${s.hotelImage || null},
         updated_at = now()
       WHERE id = ${params.id} AND trip_slug = ${params.slug}
     `;

@@ -39,4 +39,6 @@ export async function ensureTables() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `;
+  await sql`ALTER TABLE stops ADD COLUMN IF NOT EXISTS city_image TEXT`;
+  await sql`ALTER TABLE stops ADD COLUMN IF NOT EXISTS hotel_image TEXT`;
 }

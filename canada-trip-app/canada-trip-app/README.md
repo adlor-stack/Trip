@@ -1,40 +1,32 @@
 # Canada — Carnet de route
 
-App de suivi de voyage partagée, hébergée sur Vercel avec une base Postgres (Neon).
-Pas de compte utilisateur : l'accès se fait via un lien fixe
-(`https://votre-app.vercel.app/trip/canada-2026`).
+App de suivi de voyage partagée, hébergée sur Vercel avec une base Postgres (Neon)
+et un stockage de fichiers (Vercel Blob) pour les photos.
 
-## Architecture (v2)
+## Architecture
 
 Chaque vol, chaque voiture, chaque étape est stocké comme sa propre ligne dans
-sa propre table (`general_bookings`, `stops`). Ajouter, modifier ou supprimer
-une entrée ne touche jamais aux autres, même si vous et Lamyae utilisez l'app
-en même temps sur deux téléphones. Les tables se créent automatiquement au
-premier appel, pas besoin de script de setup.
+sa propre table (`general_bookings`, `stops`). Les tables et colonnes se
+créent/mettent à jour automatiquement au premier appel.
 
 ## 1. Base de données
 
-Si vous avez déjà un projet Neon (comme pour votre app de dépenses), vous pouvez
-réutiliser la même base : cette app crée ses propres tables, elle n'entre pas
-en conflit avec vos autres tables.
+**Storage → Create Database → Postgres (Neon)**, connectez-la au projet
+(ajoute `DATABASE_URL` automatiquement).
 
-Sinon, depuis Vercel : **Storage → Create Database → Postgres (Neon)**, puis
-connectez-la à votre projet (ça ajoute automatiquement `DATABASE_URL` dans les
-Environment Variables).
+## 2. Stockage des photos (Vercel Blob)
 
-## 2. Déploiement
+**Storage → Create Database → Blob**, connectez-le au projet (ajoute
+`BLOB_READ_WRITE_TOKEN` automatiquement dans les Environment Variables).
+Sans ça, l'ajout de photos échouera (le reste de l'app fonctionne quand même).
 
-```bash
-git init
-git add .
-git commit -m "Carnet de route Canada"
-```
+## 3. Déploiement
 
-Poussez sur GitHub, puis importez le repo sur [vercel.com](https://vercel.com).
-Vérifiez que **Framework Preset** est bien sur **Next.js**, et que
-`DATABASE_URL` est bien renseigné dans les Environment Variables.
+Poussez le code sur GitHub, importez-le sur Vercel, vérifiez que **Framework
+Preset** est **Next.js**, et que `DATABASE_URL` + `BLOB_READ_WRITE_TOKEN` sont
+bien présents dans les Environment Variables.
 
-## 3. Sur vos iPhones
+## 4. Sur vos iPhones
 
 Ouvrez `https://votre-app.vercel.app/trip/canada-2026` dans Safari, puis
 **Partager → Sur l'écran d'accueil**.
@@ -43,14 +35,19 @@ Ouvrez `https://votre-app.vercel.app/trip/canada-2026` dans Safari, puis
 
 - Chaque réservation ou étape a sa propre ligne en base : les modifications
   sont indépendantes les unes des autres.
-- L'app se resynchronise automatiquement toutes les 12 secondes et à chaque
-  retour au premier plan (pas de vrai WebSocket, volontairement, pour rester
-  simple).
 - Cliquer sur une réservation ou une étape l'ouvre en consultation ; un
   bouton "Modifier" à l'intérieur permet de l'éditer.
+- Chaque étape peut avoir une photo de la ville et une photo du logement,
+  stockées via Vercel Blob et affichées en haut de la vignette.
+- Le temps de trajet entre deux étapes peut être calculé automatiquement à
+  partir des adresses des logements (bouton "🧭 Calculer"), via des services
+  cartographiques gratuits (OpenStreetMap + OSRM). Ça reste manuel-sur-demande
+  plutôt qu'automatique-silencieux, car la précision dépend de la qualité des
+  adresses saisies — vous gardez la main pour corriger si besoin.
+- L'app se resynchronise automatiquement toutes les 12 secondes et à chaque
+  retour au premier plan.
 
 ## Accès au lien
 
 Le lien n'est pas protégé par mot de passe : toute personne qui le possède
-peut voir et modifier le voyage. C'est un choix assumé pour rester simple à
-deux.
+peut voir et modifier le voyage. Choix assumé pour rester simple à deux.

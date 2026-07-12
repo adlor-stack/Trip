@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { useParams } from 'next/navigation';
 
 type GeneralBooking = {
@@ -31,6 +31,8 @@ type Stop = {
   checkin?: string;
   checkout?: string;
   activities?: Activity[];
+  cityImage?: string;
+  hotelImage?: string;
 };
 
 const FALLBACK_START = '2026-08-14';
@@ -137,8 +139,48 @@ const emptyStopForm = {
   hotelLink: '',
   hotelAddress: '',
   checkin: '',
-  checkout: ''
+  checkout: '',
+  cityImage: '',
+  hotelImage: ''
 };
+
+function ImagePicker({
+  label,
+  value,
+  uploading,
+  onChange,
+  onRemove
+}: {
+  label: string;
+  value: string;
+  uploading: boolean;
+  onChange: (e: ChangeEvent<HTMLInputElement>) => void;
+  onRemove: () => void;
+}) {
+  const inputId = 'img-' + label.replace(/\s+/g, '-');
+  return (
+    <div className="image-picker">
+      {value ? (
+        <div className="image-picker-preview">
+          <img src={value} alt={label} />
+          <button type="button" className="image-picker-remove" onClick={onRemove}>×</button>
+        </div>
+      ) : (
+        <label htmlFor={inputId} className="image-picker-empty">
+          {uploading ? 'Envoi…' : `+ ${label}`}
+        </label>
+      )}
+      <input
+        id={inputId}
+        type="file"
+        accept="image/*"
+        style={{ display: 'none' }}
+        onChange={onChange}
+        disabled={uploading}
+      />
+    </div>
+  );
+}
 
 export default function TripPage() {
   const params = useParams();
@@ -162,6 +204,9 @@ export default function TripPage() {
   const [editingStopId, setEditingStopId] = useState<string | null>(null);
   const [stopForm, setStopForm] = useState(emptyStopForm);
   const [activityDraft, setActivityDraft] = useState<Activity[]>([]);
+  const [uploadingCity, setUploadingCity] = useState(false);
+  const [uploadingHotel, setUploadingHotel] = useState(false);
+  const [calculatingDrive, setCalculatingDrive] = useState(false);
 
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const anyBlockingUiOpenRef = useRef(false);
@@ -322,7 +367,9 @@ export default function TripPage() {
         hotelLink: stop.hotelLink || '',
         hotelAddress: stop.hotelAddress || '',
         checkin: stop.checkin || '',
-        checkout: stop.checkout || ''
+        checkout: stop.checkout || '',
+        cityImage: stop.cityImage || '',
+        hotelImage: stop.hotelImage || ''
       });
       setActivityDraft((stop.activities || []).map((a) => ({ ...a })));
     } else {
@@ -353,7 +400,9 @@ export default function TripPage() {
       hotelAddress: stopForm.hotelAddress.trim(),
       checkin: stopForm.checkin,
       checkout: stopForm.checkout,
-      activities: cleanActivities
+      activities: cleanActivities,
+      cityImage: stopForm.cityImage,
+      hotelImage: stopForm.hotelImage
     };
 
     const isNew = !editingStopId;
@@ -393,6 +442,78 @@ export default function TripPage() {
   }
   function removeActivity(i: number) {
     setActivityDraft((prev) => prev.filter((_, idx) => idx !== i));
+  }
+
+  // ---------- images ----------
+  async function uploadImage(file: File): Promise<string | null> {
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await fetch('/api/upload', { method: 'POST', body: form });
+      if (!res.ok) throw new Error('upload failed');
+      const json = await res.json();
+      return json.url || null;
+    } catch (e) {
+      flashToast('Erreur d\'envoi de la photo');
+      return null;
+    }
+  }
+  async function handleCityImageChange(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingCity(true);
+    const url = await uploadImage(file);
+    if (url) setStopForm((f) => ({ ...f, cityImage: url }));
+    setUploadingCity(false);
+    e.target.value = '';
+  }
+  async function handleHotelImageChange(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingHotel(true);
+    const url = await uploadImage(file);
+    if (url) setStopForm((f) => ({ ...f, hotelImage: url }));
+    setUploadingHotel(false);
+    e.target.value = '';
+  }
+
+  // ---------- temps de trajet automatique ----------
+  function findPreviousStop(currentStart?: string) {
+    const others = stops
+      .filter((s) => s.id !== editingStopId)
+      .sort((a, b) => (a.start || '').localeCompare(b.start || ''));
+    if (!currentStart) return null;
+    const before = others.filter((s) => (s.start || '') && (s.start || '') < currentStart);
+    if (before.length === 0) return null;
+    return before[before.length - 1];
+  }
+  async function autoCalcDriveTime() {
+    const prev = findPreviousStop(stopForm.start);
+    if (!prev || !prev.hotelAddress) {
+      flashToast('Adresse de l\'étape précédente manquante');
+      return;
+    }
+    if (!stopForm.hotelAddress.trim()) {
+      flashToast('Ajoutez d\'abord l\'adresse de cette étape');
+      return;
+    }
+    setCalculatingDrive(true);
+    try {
+      const res = await fetch(
+        `/api/drive-time?from=${encodeURIComponent(prev.hotelAddress)}&to=${encodeURIComponent(stopForm.hotelAddress)}`
+      );
+      const json = await res.json();
+      if (json.driveTime) {
+        setStopForm((f) => ({ ...f, driveTime: json.driveTime }));
+        flashToast(`≈ ${json.driveTime} · ${json.distanceKm} km`);
+      } else {
+        flashToast('Calcul impossible avec ces adresses');
+      }
+    } catch (e) {
+      flashToast('Erreur de calcul');
+    } finally {
+      setCalculatingDrive(false);
+    }
   }
 
   if (loading) {
@@ -477,6 +598,24 @@ export default function TripPage() {
                   <div className={`stop ${current ? 'current' : ''}`}>
                     <div className="stop-dot" />
                     <div className="stop-card clickable" onClick={() => openStopView(s)}>
+                      {(s.cityImage || s.hotelImage) && (
+                        <div className="stop-images">
+                          <div className="stop-image-wrap">
+                            {s.cityImage ? (
+                              <img className="stop-image" src={s.cityImage} alt={s.city} />
+                            ) : (
+                              <div className="stop-image stop-image-empty">Ville</div>
+                            )}
+                          </div>
+                          <div className="stop-image-wrap">
+                            {s.hotelImage ? (
+                              <img className="stop-image" src={s.hotelImage} alt={s.hotelName || 'Logement'} />
+                            ) : (
+                              <div className="stop-image stop-image-empty">Logement</div>
+                            )}
+                          </div>
+                        </div>
+                      )}
                       <div className="stop-top">
                         <div>
                           <div className="stop-city">{s.city || 'Ville à définir'}</div>
@@ -562,6 +701,24 @@ export default function TripPage() {
         {viewStop && (
           <div className="sheet">
             <div className="sheet-handle" />
+            {(viewStop.cityImage || viewStop.hotelImage) && (
+              <div className="stop-images stop-images-large">
+                <div className="stop-image-wrap">
+                  {viewStop.cityImage ? (
+                    <img className="stop-image" src={viewStop.cityImage} alt={viewStop.city} />
+                  ) : (
+                    <div className="stop-image stop-image-empty">Ville</div>
+                  )}
+                </div>
+                <div className="stop-image-wrap">
+                  {viewStop.hotelImage ? (
+                    <img className="stop-image" src={viewStop.hotelImage} alt={viewStop.hotelName || 'Logement'} />
+                  ) : (
+                    <div className="stop-image stop-image-empty">Logement</div>
+                  )}
+                </div>
+              </div>
+            )}
             <div className="view-header">
               <div>
                 <div className="view-kicker">Étape</div>
@@ -769,9 +926,36 @@ export default function TripPage() {
               <input type="date" min={tripStart} max={tripEnd} value={stopForm.end} onChange={(e) => setStopForm({ ...stopForm, end: e.target.value })} />
             </div>
           </div>
+
+          <div className="field">
+            <label>Photos</label>
+            <div className="row2">
+              <ImagePicker
+                label="Photo de la ville"
+                value={stopForm.cityImage}
+                uploading={uploadingCity}
+                onChange={handleCityImageChange}
+                onRemove={() => setStopForm((f) => ({ ...f, cityImage: '' }))}
+              />
+              <ImagePicker
+                label="Photo du logement"
+                value={stopForm.hotelImage}
+                uploading={uploadingHotel}
+                onChange={handleHotelImageChange}
+                onRemove={() => setStopForm((f) => ({ ...f, hotelImage: '' }))}
+              />
+            </div>
+          </div>
+
           <div className="field">
             <label>Temps de trajet en voiture depuis l&apos;étape précédente</label>
-            <input type="text" placeholder="ex : 3h30" value={stopForm.driveTime} onChange={(e) => setStopForm({ ...stopForm, driveTime: e.target.value })} />
+            <div className="drive-time-row">
+              <input type="text" placeholder="ex : 3h30" value={stopForm.driveTime} onChange={(e) => setStopForm({ ...stopForm, driveTime: e.target.value })} />
+              <button type="button" className="btn-calc" onClick={autoCalcDriveTime} disabled={calculatingDrive}>
+                {calculatingDrive ? '…' : '🧭 Calculer'}
+              </button>
+            </div>
+            <div className="hint-text">Calcule automatiquement à partir de l&apos;adresse de cette étape et de la précédente.</div>
           </div>
 
           <div className="field">

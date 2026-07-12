@@ -32,7 +32,9 @@ function rowToStop(r: any) {
     hotelAddress: r.hotel_address || undefined,
     checkin: r.checkin || undefined,
     checkout: r.checkout || undefined,
-    activities: r.activities || []
+    activities: r.activities || [],
+    cityImage: r.city_image || undefined,
+    hotelImage: r.hotel_image || undefined
   };
 }
 

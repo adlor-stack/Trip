@@ -1,20 +1,28 @@
-import { put } from '@vercel/blob';
-import { NextRequest, NextResponse } from 'next/server';
+import { handleUpload, type HandleUploadBody } from '@vercel/blob/client';
+import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
-export async function POST(req: NextRequest) {
+export async function POST(request: Request): Promise<NextResponse> {
+  const body = (await request.json()) as HandleUploadBody;
+
   try {
-    const form = await req.formData();
-    const file = form.get('file');
-    if (!file || typeof file === 'string') {
-      return NextResponse.json({ error: 'no_file' }, { status: 400 });
-    }
-    const filename = `trip-images/${Date.now()}-${(file as File).name || 'photo.jpg'}`;
-    const blob = await put(filename, file as File, { access: 'public' });
-    return NextResponse.json({ url: blob.url });
-  } catch (err) {
-    console.error(err);
-    return NextResponse.json({ error: 'server_error' }, { status: 500 });
+    const jsonResponse = await handleUpload({
+      body,
+      request,
+      onBeforeGenerateToken: async () => {
+        return {
+          allowedContentTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'],
+          addRandomSuffix: true
+        };
+      },
+      onUploadCompleted: async () => {
+        // rien à faire côté serveur après l'envoi
+      }
+    });
+    return NextResponse.json(jsonResponse);
+  } catch (error) {
+    console.error(error);
+    return NextResponse.json({ error: (error as Error).message }, { status: 400 });
   }
 }

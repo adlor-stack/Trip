@@ -167,11 +167,13 @@ export default function TripPage() {
 
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const anyModalOpenRef = useRef(false);
+  const savingRef = useRef(0);
   useEffect(() => {
     anyModalOpenRef.current = anyModalOpen;
   }, [anyModalOpen]);
 
   async function fetchTrip(showLoading = false) {
+    if (!showLoading && savingRef.current > 0) return; // une sauvegarde est en cours, on n'écrase pas
     if (showLoading) setLoading(true);
     try {
       const res = await fetch(`/api/trip/${slug}`, { cache: 'no-store' });
@@ -180,7 +182,7 @@ export default function TripPage() {
         return;
       }
       const json = await res.json();
-      setTrip(json.data || DEFAULT_TRIP);
+      if (savingRef.current === 0) setTrip(json.data || DEFAULT_TRIP);
     } catch (e) {
       // silent fail on background poll
     } finally {
@@ -213,6 +215,7 @@ export default function TripPage() {
 
   async function persist(next: TripData) {
     setTrip(next);
+    savingRef.current += 1;
     try {
       const res = await fetch(`/api/trip/${slug}`, {
         method: 'PUT',
@@ -225,6 +228,8 @@ export default function TripPage() {
       flashToast('Enregistré');
     } catch (e) {
       flashToast('Erreur d\'enregistrement');
+    } finally {
+      savingRef.current -= 1;
     }
   }
 

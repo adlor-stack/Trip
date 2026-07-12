@@ -33,12 +33,6 @@ type Stop = {
   activities?: Activity[];
 };
 
-type TripData = {
-  generalBookings: GeneralBooking[];
-  stops: Stop[];
-};
-
-const DEFAULT_TRIP: TripData = { generalBookings: [], stops: [] };
 const FALLBACK_START = '2026-08-14';
 const FALLBACK_END = '2026-08-30';
 const MONTHS = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
@@ -58,10 +52,10 @@ function mapsLink(address: string) {
   return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(address);
 }
 
-function computeTripBounds(trip: TripData) {
+function computeTripBounds(generalBookings: GeneralBooking[], stops: Stop[]) {
   let start: string | null = null;
   let end: string | null = null;
-  trip.generalBookings.forEach((b) => {
+  generalBookings.forEach((b) => {
     if (b.type === '✈️' && b.date) {
       if (b.direction === 'aller' && (!start || b.date < start)) start = b.date;
       if (b.direction === 'retour' && (!end || b.date > end)) end = b.date;
@@ -72,7 +66,7 @@ function computeTripBounds(trip: TripData) {
     }
   });
   if (!start || !end) {
-    const stopDates = trip.stops.flatMap((s) => [s.start, s.end]).filter(Boolean).sort() as string[];
+    const stopDates = stops.flatMap((s) => [s.start, s.end]).filter(Boolean).sort() as string[];
     if (stopDates.length) {
       if (!start) start = stopDates[0];
       if (!end) end = stopDates[stopDates.length - 1];
@@ -150,12 +144,16 @@ export default function TripPage() {
   const params = useParams();
   const slug = params?.slug as string;
 
-  const [trip, setTrip] = useState<TripData>(DEFAULT_TRIP);
+  const [generalBookings, setGeneralBookings] = useState<GeneralBooking[]>([]);
+  const [stops, setStops] = useState<Stop[]>([]);
   const [loading, setLoading] = useState(true);
-  const [notFound, setNotFound] = useState(false);
   const [toast, setToast] = useState('');
-  const [anyModalOpen, setAnyModalOpen] = useState(false);
 
+  // view (consultation) sheets
+  const [viewGeneral, setViewGeneral] = useState<GeneralBooking | null>(null);
+  const [viewStop, setViewStop] = useState<Stop | null>(null);
+
+  // edit sheets
   const [genOpen, setGenOpen] = useState(false);
   const [editingGeneralId, setEditingGeneralId] = useState<string | null>(null);
   const [genForm, setGenForm] = useState(emptyGenForm);
@@ -166,23 +164,18 @@ export default function TripPage() {
   const [activityDraft, setActivityDraft] = useState<Activity[]>([]);
 
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const anyModalOpenRef = useRef(false);
-  const savingRef = useRef(0);
+  const anyBlockingUiOpenRef = useRef(false);
   useEffect(() => {
-    anyModalOpenRef.current = anyModalOpen;
-  }, [anyModalOpen]);
+    anyBlockingUiOpenRef.current = !!(genOpen || stopOpen || viewGeneral || viewStop);
+  }, [genOpen, stopOpen, viewGeneral, viewStop]);
 
   async function fetchTrip(showLoading = false) {
-    if (!showLoading && savingRef.current > 0) return; // une sauvegarde est en cours, on n'écrase pas
     if (showLoading) setLoading(true);
     try {
       const res = await fetch(`/api/trip/${slug}`, { cache: 'no-store' });
-      if (res.status === 404) {
-        setNotFound(true);
-        return;
-      }
       const json = await res.json();
-      if (savingRef.current === 0) setTrip(json.data || DEFAULT_TRIP);
+      setGeneralBookings(json.generalBookings || []);
+      setStops(json.stops || []);
     } catch (e) {
       // silent fail on background poll
     } finally {
@@ -194,10 +187,10 @@ export default function TripPage() {
     if (!slug) return;
     fetchTrip(true);
     const interval = setInterval(() => {
-      if (!anyModalOpenRef.current) fetchTrip(false);
+      if (!anyBlockingUiOpenRef.current) fetchTrip(false);
     }, 12000);
     const onFocus = () => {
-      if (!anyModalOpenRef.current) fetchTrip(false);
+      if (!anyBlockingUiOpenRef.current) fetchTrip(false);
     };
     window.addEventListener('focus', onFocus);
     return () => {
@@ -213,32 +206,20 @@ export default function TripPage() {
     toastTimer.current = setTimeout(() => setToast(''), 1600);
   }
 
-  async function persist(next: TripData) {
-    setTrip(next);
-    savingRef.current += 1;
-    try {
-      const res = await fetch(`/api/trip/${slug}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data: next })
-      });
-      if (!res.ok) throw new Error('save failed');
-      const json = await res.json();
-      if (json.data) setTrip(json.data);
-      flashToast('Enregistré');
-    } catch (e) {
-      flashToast('Erreur d\'enregistrement');
-    } finally {
-      savingRef.current -= 1;
-    }
-  }
-
-  const { start: tripStart, end: tripEnd } = computeTripBounds(trip);
+  const { start: tripStart, end: tripEnd } = computeTripBounds(generalBookings, stops);
   const days = Math.round((new Date(tripEnd).getTime() - new Date(tripStart).getTime()) / 86400000) + 1;
   const countdown = computeCountdown(tripStart, tripEnd);
 
-  // ---------- general booking modal ----------
-  function openGeneral(booking?: GeneralBooking) {
+  // ---------- general booking: view ----------
+  function openGeneralView(b: GeneralBooking) {
+    setViewGeneral(b);
+  }
+  function closeGeneralView() {
+    setViewGeneral(null);
+  }
+
+  // ---------- general booking: edit ----------
+  function openGeneralEdit(booking?: GeneralBooking) {
     if (booking) {
       setEditingGeneralId(booking.id);
       setGenForm({
@@ -257,14 +238,13 @@ export default function TripPage() {
       setEditingGeneralId(null);
       setGenForm(emptyGenForm);
     }
+    setViewGeneral(null);
     setGenOpen(true);
-    setAnyModalOpen(true);
   }
-  function closeGeneral() {
+  function closeGeneralEdit() {
     setGenOpen(false);
-    setAnyModalOpen(stopOpen);
   }
-  function saveGeneral() {
+  async function saveGeneral() {
     if (!genForm.name.trim()) {
       flashToast('Ajoutez un nom');
       return;
@@ -288,23 +268,49 @@ export default function TripPage() {
       base.date = genForm.date;
       base.time = genForm.time;
     }
-    const next = { ...trip };
-    if (editingGeneralId) {
-      next.generalBookings = next.generalBookings.map((b) => (b.id === editingGeneralId ? base : b));
-    } else {
-      next.generalBookings = [...next.generalBookings, base];
+
+    const isNew = !editingGeneralId;
+    setGeneralBookings((prev) => (isNew ? [...prev, base] : prev.map((b) => (b.id === base.id ? base : b))));
+    closeGeneralEdit();
+
+    try {
+      const res = await fetch(`/api/trip/${slug}/bookings${isNew ? '' : '/' + base.id}`, {
+        method: isNew ? 'POST' : 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(base)
+      });
+      if (!res.ok) throw new Error('save failed');
+      flashToast('Enregistré');
+    } catch (e) {
+      flashToast('Erreur d\'enregistrement');
+      fetchTrip(false);
     }
-    closeGeneral();
-    persist(next);
   }
-  function deleteGeneral() {
-    const next = { ...trip, generalBookings: trip.generalBookings.filter((b) => b.id !== editingGeneralId) };
-    closeGeneral();
-    persist(next);
+  async function deleteGeneral() {
+    const id = editingGeneralId;
+    if (!id) return;
+    setGeneralBookings((prev) => prev.filter((b) => b.id !== id));
+    closeGeneralEdit();
+    try {
+      const res = await fetch(`/api/trip/${slug}/bookings/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('delete failed');
+      flashToast('Supprimé');
+    } catch (e) {
+      flashToast('Erreur de suppression');
+      fetchTrip(false);
+    }
   }
 
-  // ---------- stop modal ----------
-  function openStop(stop?: Stop) {
+  // ---------- stop: view ----------
+  function openStopView(s: Stop) {
+    setViewStop(s);
+  }
+  function closeStopView() {
+    setViewStop(null);
+  }
+
+  // ---------- stop: edit ----------
+  function openStopEdit(stop?: Stop) {
     if (stop) {
       setEditingStopId(stop.id);
       setStopForm({
@@ -324,14 +330,13 @@ export default function TripPage() {
       setStopForm(emptyStopForm);
       setActivityDraft([]);
     }
+    setViewStop(null);
     setStopOpen(true);
-    setAnyModalOpen(true);
   }
-  function closeStop() {
+  function closeStopEdit() {
     setStopOpen(false);
-    setAnyModalOpen(genOpen);
   }
-  function saveStop() {
+  async function saveStop() {
     if (!stopForm.city.trim()) {
       flashToast('Ajoutez une ville');
       return;
@@ -350,19 +355,37 @@ export default function TripPage() {
       checkout: stopForm.checkout,
       activities: cleanActivities
     };
-    const next = { ...trip };
-    if (editingStopId) {
-      next.stops = next.stops.map((s) => (s.id === editingStopId ? data : s));
-    } else {
-      next.stops = [...next.stops, data];
+
+    const isNew = !editingStopId;
+    setStops((prev) => (isNew ? [...prev, data] : prev.map((s) => (s.id === data.id ? data : s))));
+    closeStopEdit();
+
+    try {
+      const res = await fetch(`/api/trip/${slug}/stops${isNew ? '' : '/' + data.id}`, {
+        method: isNew ? 'POST' : 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (!res.ok) throw new Error('save failed');
+      flashToast('Enregistré');
+    } catch (e) {
+      flashToast('Erreur d\'enregistrement');
+      fetchTrip(false);
     }
-    closeStop();
-    persist(next);
   }
-  function deleteStop() {
-    const next = { ...trip, stops: trip.stops.filter((s) => s.id !== editingStopId) };
-    closeStop();
-    persist(next);
+  async function deleteStop() {
+    const id = editingStopId;
+    if (!id) return;
+    setStops((prev) => prev.filter((s) => s.id !== id));
+    closeStopEdit();
+    try {
+      const res = await fetch(`/api/trip/${slug}/stops/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('delete failed');
+      flashToast('Supprimé');
+    } catch (e) {
+      flashToast('Erreur de suppression');
+      fetchTrip(false);
+    }
   }
 
   function updateActivity(i: number, key: 'name' | 'link', value: string) {
@@ -372,19 +395,11 @@ export default function TripPage() {
     setActivityDraft((prev) => prev.filter((_, idx) => idx !== i));
   }
 
-  if (notFound) {
-    return (
-      <div className="loading-screen">
-        Ce lien de voyage n&apos;existe pas ou plus.
-      </div>
-    );
-  }
-
   if (loading) {
     return <div className="loading-screen">Chargement du carnet de route…</div>;
   }
 
-  const sortedStops = [...trip.stops].sort((a, b) => (a.start || '').localeCompare(b.start || ''));
+  const sortedStops = [...stops].sort((a, b) => (a.start || '').localeCompare(b.start || ''));
 
   return (
     <div className="app">
@@ -404,13 +419,13 @@ export default function TripPage() {
 
       <div className="section">
         <div className="section-title">
-          Vols &amp; voiture <span className="count">{trip.generalBookings.length}</span>
+          Vols &amp; voiture <span className="count">{generalBookings.length}</span>
         </div>
-        {trip.generalBookings.length === 0 ? (
+        {generalBookings.length === 0 ? (
           <div className="empty">Pas encore de vol ou de voiture enregistré.</div>
         ) : (
-          trip.generalBookings.map((b) => (
-            <div className="booking-card" key={b.id}>
+          generalBookings.map((b) => (
+            <div className="booking-card clickable" key={b.id} onClick={() => openGeneralView(b)}>
               <div className="booking-icon">{b.type}</div>
               <div className="booking-body">
                 <div className="booking-label">
@@ -420,23 +435,28 @@ export default function TripPage() {
                 <div className="booking-name">{b.name || '—'}</div>
               </div>
               {b.link ? (
-                <a className="booking-link" href={b.link} target="_blank" rel="noopener noreferrer">↗</a>
+                <a
+                  className="booking-link"
+                  href={b.link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                >↗</a>
               ) : null}
-              <button className="booking-edit" onClick={() => openGeneral(b)}>✎</button>
             </div>
           ))
         )}
-        <div className="add-row" onClick={() => openGeneral()}>+ Ajouter une réservation</div>
+        <div className="add-row" onClick={() => openGeneralEdit()}>+ Ajouter une réservation</div>
       </div>
 
       <div className="section">
         <div className="section-title">
-          Étapes du voyage <span className="count">{trip.stops.length}</span>
+          Étapes du voyage <span className="count">{stops.length}</span>
         </div>
-        {trip.stops.length === 0 ? (
+        {stops.length === 0 ? (
           <div className="empty">
             Aucune étape pour l&apos;instant.<br />
-            <span className="add-link" onClick={() => openStop()}>Ajouter votre première ville</span>
+            <span className="add-link" onClick={() => openStopEdit()}>Ajouter votre première ville</span>
           </div>
         ) : (
           <div className="timeline">
@@ -456,43 +476,21 @@ export default function TripPage() {
                   )}
                   <div className={`stop ${current ? 'current' : ''}`}>
                     <div className="stop-dot" />
-                    <div className="stop-card">
+                    <div className="stop-card clickable" onClick={() => openStopView(s)}>
                       <div className="stop-top">
                         <div>
                           <div className="stop-city">{s.city || 'Ville à définir'}</div>
                           <div className="stop-dates">{fmtDate(s.start)} → {fmtDate(s.end)}</div>
                         </div>
                         {current && <span className="stop-badge">En cours</span>}
-                        <button className="stop-menu" onClick={() => openStop(s)}>✎</button>
                       </div>
 
                       <div className="stop-block">
                         <div className="stop-block-label">Hôtel / logement</div>
                         {s.hotelName ? (
-                          <>
-                            <div className="item-row">
-                              <div className="item-name">{s.hotelName}</div>
-                              {s.hotelLink ? (
-                                <a className="item-link" href={s.hotelLink} target="_blank" rel="noopener noreferrer">↗</a>
-                              ) : (
-                                <span className="no-link">pas de lien</span>
-                              )}
-                            </div>
-                            {s.hotelAddress && (
-                              <div className="item-row">
-                                <div className="item-name muted-empty" style={{ color: 'var(--text-dim)' }}>
-                                  {s.hotelAddress}
-                                </div>
-                                <a className="item-link" href={mapsLink(s.hotelAddress)} target="_blank" rel="noopener noreferrer">🗺️</a>
-                              </div>
-                            )}
-                            {(s.checkin || s.checkout) && (
-                              <div className="checkinout">
-                                {s.checkin && <span>Check-in <b>{s.checkin}</b></span>}
-                                {s.checkout && <span>Check-out <b>{s.checkout}</b></span>}
-                              </div>
-                            )}
-                          </>
+                          <div className="item-row">
+                            <div className="item-name">{s.hotelName}</div>
+                          </div>
                         ) : (
                           <div className="muted-empty">Pas encore renseigné.</div>
                         )}
@@ -503,16 +501,7 @@ export default function TripPage() {
                         {activities.length === 0 ? (
                           <div className="muted-empty">Aucune activité enregistrée.</div>
                         ) : (
-                          activities.map((a, idx) => (
-                            <div className="item-row" key={idx}>
-                              <div className="item-name">{a.name}</div>
-                              {a.link ? (
-                                <a className="item-link" href={a.link} target="_blank" rel="noopener noreferrer">↗</a>
-                              ) : (
-                                <span className="no-link">pas de lien</span>
-                              )}
-                            </div>
-                          ))
+                          <div className="muted-empty">{activities.map((a) => a.name).join(' · ')}</div>
                         )}
                       </div>
                     </div>
@@ -524,9 +513,136 @@ export default function TripPage() {
         )}
       </div>
 
-      <button className="fab" onClick={() => openStop()} title="Ajouter une étape">+</button>
+      <button className="fab" onClick={() => openStopEdit()} title="Ajouter une étape">+</button>
 
-      {/* GENERAL BOOKING MODAL */}
+      {/* GENERAL BOOKING — VIEW (consultation) */}
+      <div className={`overlay ${viewGeneral ? 'open' : ''}`}>
+        {viewGeneral && (
+          <div className="sheet">
+            <div className="sheet-handle" />
+            <div className="view-header">
+              <div className="view-icon">{viewGeneral.type}</div>
+              <div>
+                <div className="view-kicker">{GENERAL_LABELS[viewGeneral.type] || 'Réservation'}</div>
+                <div className="view-title">{viewGeneral.name}</div>
+              </div>
+            </div>
+
+            <div className="view-rows">
+              {bookingSubtitle(viewGeneral) && (
+                <div className="view-row">
+                  <span className="view-row-label">Quand</span>
+                  <span className="view-row-value">{bookingSubtitle(viewGeneral)}</span>
+                </div>
+              )}
+              {viewGeneral.link && (
+                <a className="view-row view-row-link" href={viewGeneral.link} target="_blank" rel="noopener noreferrer">
+                  <span className="view-row-label">Réservation</span>
+                  <span className="view-row-value">Ouvrir le lien ↗</span>
+                </a>
+              )}
+              {!viewGeneral.link && (
+                <div className="view-row">
+                  <span className="view-row-label">Réservation</span>
+                  <span className="view-row-value muted-empty">Pas de lien</span>
+                </div>
+              )}
+            </div>
+
+            <div className="sheet-actions">
+              <button className="btn btn-ghost" onClick={closeGeneralView}>Fermer</button>
+              <button className="btn btn-primary" onClick={() => openGeneralEdit(viewGeneral)}>Modifier</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* STOP — VIEW (consultation) */}
+      <div className={`overlay ${viewStop ? 'open' : ''}`}>
+        {viewStop && (
+          <div className="sheet">
+            <div className="sheet-handle" />
+            <div className="view-header">
+              <div>
+                <div className="view-kicker">Étape</div>
+                <div className="view-title">{viewStop.city || 'Ville à définir'}</div>
+                <div className="view-subtitle">{fmtDate(viewStop.start)} → {fmtDate(viewStop.end)}</div>
+              </div>
+            </div>
+
+            {viewStop.driveTime && (
+              <div className="view-rows">
+                <div className="view-row">
+                  <span className="view-row-label">Trajet</span>
+                  <span className="view-row-value">🚗 {viewStop.driveTime} depuis l&apos;étape précédente</span>
+                </div>
+              </div>
+            )}
+
+            <div className="view-section-title">Hôtel / logement</div>
+            {viewStop.hotelName ? (
+              <div className="view-rows">
+                <div className="view-row">
+                  <span className="view-row-label">Nom</span>
+                  <span className="view-row-value">{viewStop.hotelName}</span>
+                </div>
+                {viewStop.hotelLink && (
+                  <a className="view-row view-row-link" href={viewStop.hotelLink} target="_blank" rel="noopener noreferrer">
+                    <span className="view-row-label">Réservation</span>
+                    <span className="view-row-value">Ouvrir le lien ↗</span>
+                  </a>
+                )}
+                {viewStop.hotelAddress && (
+                  <a className="view-row view-row-link" href={mapsLink(viewStop.hotelAddress)} target="_blank" rel="noopener noreferrer">
+                    <span className="view-row-label">Adresse</span>
+                    <span className="view-row-value">{viewStop.hotelAddress} 🗺️</span>
+                  </a>
+                )}
+                {(viewStop.checkin || viewStop.checkout) && (
+                  <div className="view-row">
+                    <span className="view-row-label">Horaires</span>
+                    <span className="view-row-value">
+                      {viewStop.checkin ? `Check-in ${viewStop.checkin}` : ''}
+                      {viewStop.checkin && viewStop.checkout ? ' · ' : ''}
+                      {viewStop.checkout ? `Check-out ${viewStop.checkout}` : ''}
+                    </span>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="muted-empty" style={{ marginBottom: 14 }}>Pas encore renseigné.</div>
+            )}
+
+            <div className="view-section-title">Activités ({(viewStop.activities || []).length})</div>
+            {(viewStop.activities || []).length === 0 ? (
+              <div className="muted-empty" style={{ marginBottom: 14 }}>Aucune activité enregistrée.</div>
+            ) : (
+              <div className="view-rows">
+                {(viewStop.activities || []).map((a, idx) =>
+                  a.link ? (
+                    <a className="view-row view-row-link" href={a.link} target="_blank" rel="noopener noreferrer" key={idx}>
+                      <span className="view-row-value">{a.name}</span>
+                      <span className="view-row-value">↗</span>
+                    </a>
+                  ) : (
+                    <div className="view-row" key={idx}>
+                      <span className="view-row-value">{a.name}</span>
+                      <span className="no-link">pas de lien</span>
+                    </div>
+                  )
+                )}
+              </div>
+            )}
+
+            <div className="sheet-actions">
+              <button className="btn btn-ghost" onClick={closeStopView}>Fermer</button>
+              <button className="btn btn-primary" onClick={() => openStopEdit(viewStop)}>Modifier</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* GENERAL BOOKING — EDIT */}
       <div className={`overlay ${genOpen ? 'open' : ''}`}>
         <div className="sheet">
           <div className="sheet-handle" />
@@ -624,7 +740,7 @@ export default function TripPage() {
           </div>
 
           <div className="sheet-actions">
-            <button className="btn btn-ghost" onClick={closeGeneral}>Annuler</button>
+            <button className="btn btn-ghost" onClick={closeGeneralEdit}>Annuler</button>
             <button className="btn btn-primary" onClick={saveGeneral}>Enregistrer</button>
           </div>
           {editingGeneralId && (
@@ -633,7 +749,7 @@ export default function TripPage() {
         </div>
       </div>
 
-      {/* STOP MODAL */}
+      {/* STOP — EDIT */}
       <div className={`overlay ${stopOpen ? 'open' : ''}`}>
         <div className="sheet">
           <div className="sheet-handle" />
@@ -707,7 +823,7 @@ export default function TripPage() {
           </div>
 
           <div className="sheet-actions">
-            <button className="btn btn-ghost" onClick={closeStop}>Annuler</button>
+            <button className="btn btn-ghost" onClick={closeStopEdit}>Annuler</button>
             <button className="btn btn-primary" onClick={saveStop}>Enregistrer</button>
           </div>
           {editingStopId && (

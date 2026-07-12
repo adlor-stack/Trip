@@ -1,21 +1,36 @@
-import { neon } from '@neondatabase/serverless';
 import { NextRequest, NextResponse } from 'next/server';
+import { sql, ensureTables } from '@/lib/db';
 
-const sql = neon(process.env.DATABASE_URL!);
+function rowToBooking(r: any) {
+  return {
+    id: r.id,
+    type: r.type,
+    name: r.name,
+    link: r.link || '',
+    direction: r.direction || undefined,
+    date: r.date || undefined,
+    time: r.time || undefined,
+    pickupDate: r.pickup_date || undefined,
+    pickupTime: r.pickup_time || undefined,
+    returnDate: r.return_date || undefined,
+    returnTime: r.return_time || undefined
+  };
+}
 
-async function ensureTrip(slug: string) {
-  await sql`
-    CREATE TABLE IF NOT EXISTS trips (
-      id SERIAL PRIMARY KEY,
-      slug TEXT UNIQUE NOT NULL,
-      data JSONB NOT NULL DEFAULT '{"generalBookings":[],"stops":[]}'::jsonb,
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    )
-  `;
-  await sql`
-    INSERT INTO trips (slug) VALUES (${slug})
-    ON CONFLICT (slug) DO NOTHING
-  `;
+function rowToStop(r: any) {
+  return {
+    id: r.id,
+    city: r.city,
+    start: r.start_date || undefined,
+    end: r.end_date || undefined,
+    driveTime: r.drive_time || undefined,
+    hotelName: r.hotel_name || undefined,
+    hotelLink: r.hotel_link || undefined,
+    hotelAddress: r.hotel_address || undefined,
+    checkin: r.checkin || undefined,
+    checkout: r.checkout || undefined,
+    activities: r.activities || []
+  };
 }
 
 export async function GET(
@@ -23,31 +38,17 @@ export async function GET(
   { params }: { params: { slug: string } }
 ) {
   try {
-    await ensureTrip(params.slug);
-    const rows = await sql`
-      SELECT data, updated_at FROM trips WHERE slug = ${params.slug}
+    await ensureTables();
+    const bookingRows = await sql`
+      SELECT * FROM general_bookings WHERE trip_slug = ${params.slug} ORDER BY created_at ASC
     `;
-    return NextResponse.json({ data: rows[0].data, updatedAt: rows[0].updated_at });
-  } catch (err) {
-    console.error(err);
-    return NextResponse.json({ error: 'server_error' }, { status: 500 });
-  }
-}
-
-export async function PUT(
-  req: NextRequest,
-  { params }: { params: { slug: string } }
-) {
-  try {
-    await ensureTrip(params.slug);
-    const body = await req.json();
-    const rows = await sql`
-      UPDATE trips
-      SET data = ${JSON.stringify(body.data)}::jsonb, updated_at = now()
-      WHERE slug = ${params.slug}
-      RETURNING data, updated_at
+    const stopRows = await sql`
+      SELECT * FROM stops WHERE trip_slug = ${params.slug} ORDER BY start_date ASC NULLS LAST, created_at ASC
     `;
-    return NextResponse.json({ data: rows[0].data, updatedAt: rows[0].updated_at });
+    return NextResponse.json({
+      generalBookings: bookingRows.map(rowToBooking),
+      stops: stopRows.map(rowToStop)
+    });
   } catch (err) {
     console.error(err);
     return NextResponse.json({ error: 'server_error' }, { status: 500 });

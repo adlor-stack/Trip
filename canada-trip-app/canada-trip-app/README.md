@@ -1,40 +1,28 @@
 # Canada — Carnet de route
 
 App de suivi de voyage partagée, hébergée sur Vercel avec une base Postgres (Neon).
-Pas de compte utilisateur : l'accès se fait via un lien privé difficile à deviner
-(ex : `https://votre-app.vercel.app/trip/k3f8s9dj2m4nq7wr`).
+Pas de compte utilisateur : l'accès se fait via un lien fixe
+(`https://votre-app.vercel.app/trip/canada-2026`).
+
+## Architecture (v2)
+
+Chaque vol, chaque voiture, chaque étape est stocké comme sa propre ligne dans
+sa propre table (`general_bookings`, `stops`). Ajouter, modifier ou supprimer
+une entrée ne touche jamais aux autres, même si vous et Lamyae utilisez l'app
+en même temps sur deux téléphones. Les tables se créent automatiquement au
+premier appel, pas besoin de script de setup.
 
 ## 1. Base de données
 
 Si vous avez déjà un projet Neon (comme pour votre app de dépenses), vous pouvez
-réutiliser la même base : cette app crée sa propre table `trips`, elle n'entre pas
+réutiliser la même base : cette app crée ses propres tables, elle n'entre pas
 en conflit avec vos autres tables.
 
-Sinon, créez un projet gratuit sur [neon.tech](https://neon.tech), ou depuis
-Vercel : **Storage → Create Database → Postgres (Neon)**.
+Sinon, depuis Vercel : **Storage → Create Database → Postgres (Neon)**, puis
+connectez-la à votre projet (ça ajoute automatiquement `DATABASE_URL` dans les
+Environment Variables).
 
-Récupérez la chaîne de connexion (`DATABASE_URL`).
-
-## 2. Configuration locale
-
-```bash
-cp .env.example .env
-# éditez .env et collez votre DATABASE_URL
-
-npm install
-```
-
-## 3. Créer le voyage (une seule fois)
-
-```bash
-npm run seed
-```
-
-Ça crée la table `trips` si besoin, génère un lien privé unique, et l'affiche
-dans le terminal. Gardez ce lien : c'est lui qu'il faut ouvrir sur vos deux
-iPhones.
-
-## 4. Déploiement sur Vercel
+## 2. Déploiement
 
 ```bash
 git init
@@ -42,33 +30,27 @@ git add .
 git commit -m "Carnet de route Canada"
 ```
 
-Poussez sur un repo GitHub, puis sur [vercel.com](https://vercel.com) :
-**Add New Project** → importez le repo → dans les Environment Variables,
-ajoutez `DATABASE_URL` (la même valeur que dans `.env`) → **Deploy**.
+Poussez sur GitHub, puis importez le repo sur [vercel.com](https://vercel.com).
+Vérifiez que **Framework Preset** est bien sur **Next.js**, et que
+`DATABASE_URL` est bien renseigné dans les Environment Variables.
 
-## 5. Sur vos iPhones
+## 3. Sur vos iPhones
 
-Ouvrez `https://votre-app.vercel.app/trip/<votre-code>` dans Safari, puis
-**Partager → Sur l'écran d'accueil**. Ça se comporte comme une vraie app,
-sans barre d'adresse.
+Ouvrez `https://votre-app.vercel.app/trip/canada-2026` dans Safari, puis
+**Partager → Sur l'écran d'accueil**.
 
 ## Fonctionnement
 
-- Toutes les données (vols, voiture, étapes, hôtels, activités) sont stockées
-  en une seule ligne JSON dans la table `trips`.
-- Chaque modification est enregistrée immédiatement en base.
+- Chaque réservation ou étape a sa propre ligne en base : les modifications
+  sont indépendantes les unes des autres.
 - L'app se resynchronise automatiquement toutes les 12 secondes et à chaque
-  retour au premier plan, donc si vous modifiez sur votre téléphone, Lamyae
-  voit la mise à jour en revenant sur l'app (pas besoin de tirer pour
-  rafraîchir, mais ça marche aussi si vous rouvrez l'app).
-- Ce n'est pas du "temps réel" au sens strict (pas de WebSocket) : c'est un
-  choix volontaire pour rester simple et bon marché à héberger. Si un vrai
-  temps réel s'avère utile pendant le voyage (édition simultanée fréquente),
-  on pourra ajouter Supabase Realtime ou Pusher facilement.
+  retour au premier plan (pas de vrai WebSocket, volontairement, pour rester
+  simple).
+- Cliquer sur une réservation ou une étape l'ouvre en consultation ; un
+  bouton "Modifier" à l'intérieur permet de l'éditer.
 
-## Sécurité du lien
+## Accès au lien
 
-Le lien contient un identifiant aléatoire de 16 caractères : il n'est pas
-indexé, ne peut pas être deviné, mais n'est pas protégé par mot de passe.
-Ne le partagez qu'avec les personnes de confiance, et évitez de le publier
-publiquement (réseaux sociaux, etc.).
+Le lien n'est pas protégé par mot de passe : toute personne qui le possède
+peut voir et modifier le voyage. C'est un choix assumé pour rester simple à
+deux.

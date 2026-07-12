@@ -166,6 +166,10 @@ export default function TripPage() {
   const [activityDraft, setActivityDraft] = useState<Activity[]>([]);
 
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const anyModalOpenRef = useRef(false);
+  useEffect(() => {
+    anyModalOpenRef.current = anyModalOpen;
+  }, [anyModalOpen]);
 
   async function fetchTrip(showLoading = false) {
     if (showLoading) setLoading(true);
@@ -188,10 +192,10 @@ export default function TripPage() {
     if (!slug) return;
     fetchTrip(true);
     const interval = setInterval(() => {
-      if (!anyModalOpen) fetchTrip(false);
+      if (!anyModalOpenRef.current) fetchTrip(false);
     }, 12000);
     const onFocus = () => {
-      if (!anyModalOpen) fetchTrip(false);
+      if (!anyModalOpenRef.current) fetchTrip(false);
     };
     window.addEventListener('focus', onFocus);
     return () => {
@@ -199,7 +203,7 @@ export default function TripPage() {
       window.removeEventListener('focus', onFocus);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slug, anyModalOpen]);
+  }, [slug]);
 
   function flashToast(msg: string) {
     setToast(msg);
@@ -216,6 +220,8 @@ export default function TripPage() {
         body: JSON.stringify({ data: next })
       });
       if (!res.ok) throw new Error('save failed');
+      const json = await res.json();
+      if (json.data) setTrip(json.data);
       flashToast('Enregistré');
     } catch (e) {
       flashToast('Erreur d\'enregistrement');
